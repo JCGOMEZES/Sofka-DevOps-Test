@@ -1,0 +1,98 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+pool:
+  name: Azure Pipelines
+  demands:
+  - maven
+  - vstest
+
+steps:
+- script: echo Hello, world!
+  displayName: 'Run a one-line script'
+
+
+- task: SonarCloudPrepare@1
+  inputs:
+    SonarCloud: 'AzureDevops'
+    organization: 'psonarcloud'
+    scannerMode: 'Other'
+
+- task: Maven@4
+  displayName: 'Maven ApiRest/pom.xml'
+  inputs:
+    mavenPomFile: '$(System.DefaultWorkingDirectory)/ApiRest/pom.xml'
+    publishJUnitResults: false
+    jdkVersionOption: '1.11'
+    sonarQubeRunAnalysis: true
+
+- task: PublishTestResults@2
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: '**/TEST-*.xml'
+
+- task: SonarCloudPublish@1
+  inputs:
+    pollingTimeoutSec: '300'
+
+- task: CopyFiles@2
+  displayName: 'Copy Files to: $(build.artifactstagingdirectory)/Imagen'
+  inputs:
+    SourceFolder: '$(system.defaultworkingdirectory)'
+    Contents: 'ApiRest/target/pichincha-0.0.1-SNAPSHOT.jar'
+    TargetFolder: '$(build.artifactstagingdirectory)/Imagen'
+  condition: succeededOrFailed()
+
+- task: CopyFiles@2
+  displayName: 'Copy Files Docker to: $(build.artifactstagingdirectory) '
+  inputs:
+    SourceFolder: Docker
+    Contents: '*'
+    TargetFolder: '$(build.artifactstagingdirectory)/Imagen/ApiRest/target'
+  condition: succeededOrFailed()
+
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish Artifact: imagen'
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)/Imagen/ApiRest/target'
+    ArtifactName: imagen
+
+- task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@0
+  displayName: 'Install Terraform'
+  inputs:
+    terraformVersion: latest
+
+
+- task: TerraformCLI@0
+  displayName: 'terraform Init'
+  inputs:
+    command: 'init'
+    workingDirectory: 'Infraestructura'
+    allowTelemetryCollection: true
+
+- task: TerraformCLI@0
+  displayName: 'terraform Plan'
+  inputs:
+    command: 'plan'
+    workingDirectory: 'Infraestructura'
+    allowTelemetryCollection: true
+    publishPlanResults: 'Plan_Infraestructura_Desplegar'
+
+- task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-cli.TerraformCLI@0
+  displayName: 'terraform Apply'
+  inputs:
+    command: apply
+    workingDirectory: Infraestructura
+    commandOptions: '--auto-approve'
+
+- task: TerraformCLI@0
+  inputs:
+    command: 'destroy'
+    workingDirectory: 'Infraestructura'
+    commandOptions: '--auto-approve'
+    allowTelemetryCollection: false
