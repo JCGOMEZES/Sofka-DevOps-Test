@@ -7,44 +7,73 @@ trigger:
 - main
 
 pool:
-  name: Azure Pipelines
-  demands:
-  - maven
-  - vstest
+  vmImage: 'ubuntu-latest'
 
 steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
-
-
-- task: SonarCloudPrepare@1
+- task: UseNode@1
   inputs:
-    SonarCloud: 'AzureDevops'
-    organization: 'psonarcloud'
-    scannerMode: 'Other'
+    version: '16.x'
+  displayName: 'Install Node.js'
 
-- task: Maven@4
-  displayName: 'Maven ApiRest/pom.xml'
-  inputs:
-    mavenPomFile: '$(System.DefaultWorkingDirectory)/ApiRest/pom.xml'
-    publishJUnitResults: false
-    jdkVersionOption: '1.11'
-    sonarQubeRunAnalysis: true
+- script: |
+    npm install
+  displayName: 'npm install'
 
-- task: PublishTestResults@2
+- script: |
+    npm run build
+  displayName: 'npm build'
+    
+- task: Docker@2
+  displayName: login
   inputs:
-    testResultsFormat: 'JUnit'
-    testResultsFiles: '**/TEST-*.xml'
+    containerRegistry: 'Bex_Default_Openshift_Dev_Registry'
+    command: login
 
-- task: SonarCloudPublish@1
-  inputs:
-    pollingTimeoutSec: '300'
+- bash: |
+   GIT_VERSION=$(short.commit)
+   BRANCH_NAME=$(echo $(Build.SourceBranch) | awk -F/ '{print $3}')
+   echo "--Dockerfile"
+   cat Dockerfile
+   echo ""
+   echo ""
+   echo "--Build"
+   docker build -t $(registry.base.url)/$(registry.namespace)/$(service.name):$(service.version)-$GIT_VERSION .
+  displayName: 'Build - Docker Build'
+  steps:
+  
+- bash: |
+   GIT_VERSION=$(short.commit)
+   BRANCH_NAME=$(echo $(Build.SourceBranch) | awk -F/ '{print $3}')
+   publishPath=$(Build.SourcesDirectory)/build-$(Build.BuildNumber)
+
+   docker image push $(registry.base.url)/$(registry.namespace)/$(service.name):$(service.version)-$GIT_VERSION
+   #Clean directory
+   if [ -d target ]; then
+      rm -R target
+   fi
+   if [ -d pack ]; then
+      rm -R pack
+   fi
+   echo ""
+   echo "--Copy to publish: $publishPath"
+   mkdir -p "$publishPath"
+   echo "build: $(Build.BuildNumber)" > $publishPath/build-report-$(Build.BuildNumber).json
+   echo "base Image: $(registry.base.url)/$(registry.base.namespace)/$(registry.name.tag)" >> $publishPath/build-report-$(Build.BuildNumber).json
+   echo "image: $(service.name):$(service.version)-$GIT_VERSION" >> $publishPath/build-report-$(Build.BuildNumber).json
+   echo "" >> $publishPath/build-report-$(Build.BuildNumber).json
+   echo "$(docker images -q $(service.name):$(service.version)-$GIT_VERSION)" >> $publishPath/build-report-$(Build.BuildNumber).json
+   ls -al $publishPath
+   echo ""
+   cat $publishPath/build-report-$(Build.BuildNumber).json
+   echo "-- Remove Image"
+   docker rmi $(registry.base.url)/$(registry.namespace)/$(service.name):$(service.version)-$GIT_VERSION
+  displayName: '-B->> Build - Push image'
 
 - task: CopyFiles@2
   displayName: 'Copy Files to: $(build.artifactstagingdirectory)/Imagen'
   inputs:
     SourceFolder: '$(system.defaultworkingdirectory)'
-    Contents: 'ApiRest/target/pichincha-0.0.1-SNAPSHOT.jar'
+    Contents: 'ApiRest/target/Sofka-DevOps-Test-0.0.1-SNAPSHOT.js'
     TargetFolder: '$(build.artifactstagingdirectory)/Imagen'
   condition: succeededOrFailed()
 
@@ -66,7 +95,6 @@ steps:
   displayName: 'Install Terraform'
   inputs:
     terraformVersion: latest
-
 
 - task: TerraformCLI@0
   displayName: 'terraform Init'
@@ -96,3 +124,4 @@ steps:
     workingDirectory: 'Infraestructura'
     commandOptions: '--auto-approve'
     allowTelemetryCollection: false
+  
