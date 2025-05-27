@@ -39,7 +39,6 @@ steps:
    echo "--Build"
    docker build -t $(registry.base.url)/$(registry.namespace)/$(service.name):$(service.version)-$GIT_VERSION .
   displayName: 'Build - Docker Build'
-  steps:
   
 - bash: |
    GIT_VERSION=$(short.commit)
